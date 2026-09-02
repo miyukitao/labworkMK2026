@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Swing Sound</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; padding: 40px 20px; background: #f2f2f7; }
+    .card { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 400px; margin: auto; }
+    button { font-size: 18px; font-weight: bold; padding: 15px 30px; border-radius: 12px; background: #007aff; color: white; border: none; cursor: pointer; width: 100%; }
+    #status { margin-top: 25px; font-size: 16px; color: #666; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Swing Sound Player</h2>
+    <button id="connectBtn">M5StickCと接続</button>
+    <div id="status">未接続</div>
+  </div>
+
+  <!-- 打球音音源 -->
+  <audio id="sound" src="sound-tennis.wav" preload="auto"></audio>
+
+  <script>
+    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+    const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+    const btn = document.getElementById('connectBtn');
+    const status = document.getElementById('status');
+    const audio = document.getElementById('sound');
+
+    btn.addEventListener('click', async () => {
+      // iOSの自動再生制限解除用（ダミー再生）
+      audio.play().then(() => { audio.pause(); audio.currentTime = 0; }).catch(() => {});
+
+      try {
+        status.innerText = "スキャン中... M5StickCの電源を確認してください";
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [{ name: 'M5StickC_BLE' }],
+          optionalServices: [SERVICE_UUID]
+        });
+
+        status.innerText = "接続中...";
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        const characteristic = await service.getCharacteristic(CHAR_TX_UUID);
+
+        await characteristic.startNotifications();
+        characteristic.addEventListener('characteristicvaluechanged', () => {
+          audio.currentTime = 0;
+          audio.play();
+          status.innerText = "🔥 スイング検知！ 音を再生しました";
+        });
+
+        status.innerText = "✅ 接続完了！スイングしてください";
+        btn.style.display = "none";
+      } catch (err) {
+        status.innerText = "エラー: " + err;
+      }
+    });
+  </script>
+</body>
+</html>
