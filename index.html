@@ -88,8 +88,8 @@
             if (parts.length >= 2) {
               const norm = parseFloat(parts[1]);
               
-              // ★ 記録中 かつ 2.5Gを超えたら音を鳴らす
-              if (isRecording && norm > 2.5) {
+              // ★ 記録中 かつ 1.2Gを超えたら音を鳴らす
+              if (isRecording && norm > 1.2) {
                 audio.currentTime = 0;
                 audio.play();
               }
