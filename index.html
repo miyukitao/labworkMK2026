@@ -83,10 +83,16 @@
             line = line.trim();
             if (line.length === 0) continue;
 
-            // スイングシグナル "S" を受け取った場合は効果音再生
-            if (line === "S") {
-              audio.currentTime = 0;
-              audio.play();
+            // カンマで区切って2番目の数値（生合成加速度 Norm）を取り出す
+            const parts = line.split(",");
+            if (parts.length >= 2) {
+              const norm = parseFloat(parts[1]);
+              
+              // ★ 記録中 かつ 2.5Gを超えたら音を鳴らす
+              if (isRecording && norm > 2.5) {
+                audio.currentTime = 0;
+                audio.play();
+              }
             }
 
             // 記録中の場合は生加速度データを保存
