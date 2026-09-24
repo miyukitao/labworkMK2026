@@ -133,7 +133,20 @@
 
       // 生加速度用のCSVヘッダー
       const header = "Time_ms,Raw_Norm_G,Raw_Acc_X,Raw_Acc_Y,Raw_Acc_Z\n";
-      const csvContent = header + recordedData.join("\n");
+      let startTime = null;
+      const relativeRows = recordedData.map(line => {
+        const parts = line.split(",");
+        const timeVal = parseInt(parts[0], 10);
+        if (startTime === null && !isNaN(timeVal)) {
+          startTime = timeVal; // 最初の時刻（例: 96439）を記憶
+        }
+        if (!isNaN(timeVal)) {
+          parts[0] = timeVal - startTime; // 96439 - 96439 = 0 ms に変換
+        }
+        return parts.join(",");
+      });
+
+      const csvContent = header + relativeRows.join("\n");
 
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
