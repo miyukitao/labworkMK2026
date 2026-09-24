@@ -41,6 +41,7 @@
 
     let isRecording = false;
     let recordedData = [];
+    let startTime = null;
     let textDecoder = new TextDecoder();
     let receiveBuffer = "";
 
@@ -90,7 +91,18 @@
 
             // 記録中の場合は生加速度データを保存
             if (isRecording) {
-              recordedData.push(line);
+              const parts = line.split(",");
+              const currentMs = parseInt(parts[0].trim(), 10);
+
+              if (!isNaN(currentMs)) {
+                // 記録開始後の最初の1行目の時間を基準（0ms）にする
+                if (startTime === null) {
+                  startTime = currentMs;
+                }
+                // 基準時刻を引いて 0ms 起点に置き換える
+                parts[0] = currentMs - startTime;
+                recordedData.push(parts.join(","));
+              }
             }
           }
 
@@ -110,6 +122,7 @@
     // 2. 記録スタート
     startBtn.addEventListener('click', () => {
       recordedData = [];
+      startTime = null;
       isRecording = true;
       startBtn.disabled = true;
       stopBtn.disabled = false;
@@ -133,20 +146,7 @@
 
       // 生加速度用のCSVヘッダー
       const header = "Time_ms,Raw_Norm_G,Raw_Acc_X,Raw_Acc_Y,Raw_Acc_Z\n";
-      let startTime = null;
-      const relativeRows = recordedData.map(line => {
-        const parts = line.split(",");
-        const timeVal = parseInt(parts[0], 10);
-        if (startTime === null && !isNaN(timeVal)) {
-          startTime = timeVal; // 最初の時刻（例: 96439）を記憶
-        }
-        if (!isNaN(timeVal)) {
-          parts[0] = timeVal - startTime; // 96439 - 96439 = 0 ms に変換
-        }
-        return parts.join(",");
-      });
-
-      const csvContent = header + relativeRows.join("\n");
+      const csvContent = header + recordedData.join("\n");
 
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
