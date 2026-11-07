@@ -29,6 +29,7 @@
       <div id="dataCount">記録行数: 0 行</div>
     </div>
 
+    <video id="cameraPreview" autoplay muted playsinline style="display:none;width:100%;margin-top:14px;border-radius:10px;background:#000"></video>
     <div id="status">未接続</div>
   </div>
 
@@ -44,6 +45,24 @@
     let startTime = null;
     let textDecoder = new TextDecoder();
     let receiveBuffer = "";
+    let cameraStream = null;
+    let mediaRecorder = null;
+    let videoChunks = [];
+    let recordingName = "";
+    let videoStartedAt = null;
+    let csvFirstReceivedAt = null;
+    const cameraPreview = document.getElementById('cameraPreview');
+    const timestampName = () => {
+      const d = new Date();
+      return d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0') + '_' +
+        String(d.getHours()).padStart(2,'0') + String(d.getMinutes()).padStart(2,'0') + String(d.getSeconds()).padStart(2,'0');
+    };
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
 
     const connectBtn = document.getElementById('connectBtn');
     const controlPanel = document.getElementById('controlPanel');
@@ -88,8 +107,8 @@
             if (parts.length >= 2) {
               const norm = parseFloat(parts[1]);
               
-              // ★ 記録中 かつ 6.0Gを超えたら音を鳴らす
-              if (isRecording && norm > 6.0) {
+              // ★ 記録中 かつ 9Gを超えたら音を鳴らす
+              if (isRecording && norm > 9) {
                 audio.currentTime = 0;
                 audio.play();
               }
@@ -104,6 +123,7 @@
                 // 記録開始後の最初の1行目の時間を基準（0ms）にする
                 if (startTime === null) {
                   startTime = currentMs;
+                  csvFirstReceivedAt = performance.now();
                 }
                 // 基準時刻を引いて 0ms 起点に置き換える
                 parts[0] = currentMs - startTime;
@@ -125,16 +145,60 @@
       }
     });
 
-    // 2. 記録スタート
-    startBtn.addEventListener('click', () => {
+    // 2. 記録スタート：カメラとCSVを一緒に開始
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+      } catch (err) {
+        // マイクを許可できない場合は映像のみ試す
+        try { cameraStream = await navigator.mediaDevices.getUserMedia({video: true, audio: false}); }
+        catch (cameraErr) {
+          startBtn.disabled = false;
+          status.innerText = 'カメラを開始できません: ' + cameraErr.message;
+          return;
+        }
+      }
+      if (!window.MediaRecorder) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        startBtn.disabled = false;
+        status.innerText = 'このブラウザは動画録画に対応していません';
+        return;
+      }
+      const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+        .find(m => MediaRecorder.isTypeSupported(m));
+      try { mediaRecorder = new MediaRecorder(cameraStream, mime ? {mimeType:mime} : undefined); }
+      catch (err) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        startBtn.disabled = false;
+        status.innerText = '録画開始エラー: ' + err.message;
+        return;
+      }
+      videoChunks = [];
+      recordingName = timestampName();
+      mediaRecorder.ondataavailable = e => { if (e.data.size) videoChunks.push(e.data); };
+      mediaRecorder.onstop = () => {
+        const type = mediaRecorder.mimeType || 'video/webm';
+        const ext = type.includes('mp4') ? 'mp4' : 'webm';
+        downloadBlob(new Blob(videoChunks, {type}), recordingName + '.' + ext);
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraPreview.srcObject = null;
+        cameraPreview.style.display = 'none';
+        status.innerText = '記録完了：動画を保存しました。CSVもダウンロードしてください。';
+      };
+      cameraPreview.srcObject = cameraStream;
+      cameraPreview.style.display = 'block';
       recordedData = [];
       startTime = null;
+      csvFirstReceivedAt = null;
+      receiveBuffer = '';
+      mediaRecorder.start(1000);
+      videoStartedAt = performance.now();
       isRecording = true;
-      startBtn.disabled = true;
       stopBtn.disabled = false;
       downloadBtn.disabled = true;
-      status.innerText = "● 記録中... スイングしてください";
-      dataCount.innerText = "記録行数: 0 行";
+      status.innerText = '● CSVとカメラを記録中... スイングしてください';
+      dataCount.innerText = '記録行数: 0 行';
     });
 
     // 3. 記録ストップ
@@ -143,7 +207,8 @@
       startBtn.disabled = false;
       stopBtn.disabled = true;
       downloadBtn.disabled = false;
-      status.innerText = `記録完了 (${recordedData.length} 件取得)`;
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+      status.innerText = `記録完了 (${recordedData.length} 件)。動画保存処理中...`;
     });
 
     // 4. CSVダウンロード（日付付きファイル名: YYYYMMDD_HHMMSS.csv）
@@ -157,22 +222,14 @@
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
 
-      const d = new Date();
-      const dateStr = d.getFullYear() +
-        String(d.getMonth() + 1).padStart(2, '0') +
-        String(d.getDate()).padStart(2, '0') + "_" +
-        String(d.getHours()).padStart(2, '0') +
-        String(d.getMinutes()).padStart(2, '0') +
-        String(d.getSeconds()).padStart(2, '0');
-
-      const fileName = `${dateStr}.csv`;
-
-      const link = document.createElement("a");
-      link.setAttribute("href", url);
-      link.setAttribute("download", fileName);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const fileName = `${recordingName}.csv`;
+      downloadBlob(blob, fileName);
+      // CSVの時刻0は動画開始と厳密には一致しない。差を別ファイルに保存。
+      const timing = {
+        video_to_first_csv_ms: csvFirstReceivedAt === null ? null : Math.round(csvFirstReceivedAt - videoStartedAt),
+        note: 'CSVのTime_ms=0は最初の受信行。video_to_first_csv_msはブラウザ受信時刻の概算であり、M5の計測・BLE通信遅延は含まない。'
+      };
+      downloadBlob(new Blob([JSON.stringify(timing,null,2)], {type:'application/json'}), recordingName + '_timing.json');
 
       status.innerText = `「${fileName}」を保存しました`;
     });
