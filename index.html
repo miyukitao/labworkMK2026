@@ -110,7 +110,13 @@
               // ★ 記録中 かつ 9Gを超えたら音を鳴らす
               if (isRecording && norm > 9) {
                 audio.currentTime = 0;
-                audio.play();
+                audio.play()
+                  .then(() => {
+                    console.log("音声再生成功");
+                  })
+                  .catch(err => {
+                    console.error("音声再生失敗:", err);
+                  });
               }
             }
 
