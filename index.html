@@ -112,13 +112,18 @@
       detectionInfo.textContent = `9G超え検出: ${detectedCount}回 / 再生開始: ${playbackCount}回 / 再生エラー: ${playbackErrorCount}回` + (extra ? ` / ${extra}` : '');
     }
     function playHitSound(source) {
-      // 音が再生中なら先頭に戻さない。音声を連続リセットする問題を防ぐ。
+      /* 音が再生中なら先頭に戻さない。音声を連続リセットする問題を防ぐ。
       if (!audio.paused && !audio.ended) {
         console.log(`[${source}] 音声再生中のため再スタートしません`);
         return;
       }
       audio.currentTime = 0;
-      const promise = audio.play();
+      const promise = audio.play();*/
+      // 再生中でも、新しい音を独立して再生する
+      const sound = new Audio(audio.src);
+      sound.volume = 1;
+      const promise = sound.play();
+      
       if (promise && typeof promise.then === 'function') {
         promise.then(() => {
           playbackCount++;
