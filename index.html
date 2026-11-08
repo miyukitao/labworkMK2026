@@ -15,6 +15,13 @@
     button:disabled { background: #c7c7cc; cursor: not-allowed; }
     #status { margin-top: 16px; font-size: 14px; color: #555; word-break: break-all; }
     #dataCount { font-size: 17px; font-weight: bold; margin-top: 10px; color: #1c1c1e; }
+    #impactBanner { display:none; margin-top:12px; padding:16px 8px; border-radius:12px; background:#ff3b30; color:white; font-size:26px; font-weight:800; }
+    #impactBanner.active { display:block; }
+    #lastImpact { margin-top:8px; font-size:14px; color:#555; }
+    #cameraBox { position:relative; margin-top:14px; }
+    #cameraPreview { display:none; width:100%; border-radius:10px; background:#000; }
+    #cameraImpact { display:none; position:absolute; top:12px; left:10px; right:10px; background:rgba(255,59,48,.92); color:white; font-weight:800; font-size:24px; padding:10px; border-radius:8px; pointer-events:none; }
+    #cameraImpact.active { display:block; }
   </style>
 </head>
 <body>
@@ -27,9 +34,16 @@
       <button id="stopBtn" class="btn-stop" disabled>■ 記録ストップ</button>
       <button id="downloadBtn" class="btn-download" disabled>📥 CSVダウンロード</button>
       <div id="dataCount">記録行数: 0 行</div>
+      <div id="impactBanner" role="status" aria-live="polite">🎾 打球検出！</div>
+      <div id="lastImpact">最新の打球検出: なし</div>
+      <div id="detectionInfo" style="margin-top:10px;font-size:14px;text-align:left;line-height:1.7">9G超え検出: 0回 / 再生開始: 0回 / 再生エラー: 0回</div>
+      <button id="testSoundBtn" type="button" style="background:#ff9500;color:white">🔊 音声テスト</button>
     </div>
 
-    <video id="cameraPreview" autoplay muted playsinline style="display:none;width:100%;margin-top:14px;border-radius:10px;background:#000"></video>
+    <div id="cameraBox">
+      <video id="cameraPreview" autoplay muted playsinline></video>
+      <div id="cameraImpact">🎾 打球検出！</div>
+    </div>
     <div id="status">未接続</div>
   </div>
 
@@ -72,6 +86,58 @@
     const status = document.getElementById('status');
     const dataCount = document.getElementById('dataCount');
     const audio = document.getElementById('sound');
+    const detectionInfo = document.getElementById('detectionInfo');
+    const impactBanner = document.getElementById('impactBanner');
+    const cameraImpact = document.getElementById('cameraImpact');
+    const lastImpact = document.getElementById('lastImpact');
+    let impactHideTimer = null;
+    function showImpact(norm, now) {
+      impactBanner.textContent = `🎾 打球検出！ ${norm.toFixed(2)}G`;
+      cameraImpact.textContent = `🎾 打球検出！ ${norm.toFixed(2)}G`;
+      lastImpact.textContent = `最新の打球検出: ${norm.toFixed(2)}G / 記録開始から約${((now - videoStartedAt)/1000).toFixed(2)}秒`;
+      impactBanner.classList.add('active');
+      cameraImpact.classList.add('active');
+      clearTimeout(impactHideTimer);
+      impactHideTimer = setTimeout(() => {
+        impactBanner.classList.remove('active');
+        cameraImpact.classList.remove('active');
+      }, 1200);
+    }
+    const SOUND_THRESHOLD_G = 9;
+    const SOUND_COOLDOWN_MS = 500;
+    let lastSoundAt = -Infinity;
+    let detectedCount = 0;
+    let playbackCount = 0;
+    let playbackErrorCount = 0;
+    function updateDetectionInfo(extra = '') {
+      detectionInfo.textContent = `9G超え検出: ${detectedCount}回 / 再生開始: ${playbackCount}回 / 再生エラー: ${playbackErrorCount}回` + (extra ? ` / ${extra}` : '');
+    }
+    function playHitSound(source) {
+      // 音が再生中なら先頭に戻さない。音声を連続リセットする問題を防ぐ。
+      if (!audio.paused && !audio.ended) {
+        console.log(`[${source}] 音声再生中のため再スタートしません`);
+        return;
+      }
+      audio.currentTime = 0;
+      const promise = audio.play();
+      if (promise && typeof promise.then === 'function') {
+        promise.then(() => {
+          playbackCount++;
+          updateDetectionInfo('再生開始を確認');
+          console.log(`[${source}] 音声再生開始`, performance.now().toFixed(1), 'ms');
+        }).catch(err => {
+          playbackErrorCount++;
+          updateDetectionInfo('再生失敗: ' + err.name);
+          console.error(`[${source}] 音声再生失敗:`, err);
+        });
+      }
+    }
+    document.getElementById('testSoundBtn').addEventListener('click', () => {
+      console.log('音声テストボタンを押しました');
+      audio.pause();
+      audio.currentTime = 0;
+      playHitSound('音声テスト');
+    });
 
     // 1. Bluetooth 接続
     connectBtn.addEventListener('click', async () => {
@@ -107,16 +173,19 @@
             if (parts.length >= 2) {
               const norm = parseFloat(parts[1]);
               
-              // ★ 記録中 かつ 9Gを超えたら音を鳴らす
-              if (isRecording && norm > 9) {
-                audio.currentTime = 0;
-                audio.play()
-                  .then(() => {
-                    console.log("音声再生成功");
-                  })
-                  .catch(err => {
-                    console.error("音声再生失敗:", err);
-                  });
+              // 9Gを超えた受信行をすべて数え、再生は500ms以上間隔を空ける
+              if (isRecording && Number.isFinite(norm) && norm > SOUND_THRESHOLD_G) {
+                detectedCount++;
+                const now = performance.now();
+                console.log(`9G超え検出 #${detectedCount}: ${norm}G / ブラウザ時刻 ${now.toFixed(1)}ms`);
+                updateDetectionInfo(`最新: ${norm.toFixed(2)}G`);
+                if (now - lastSoundAt >= SOUND_COOLDOWN_MS) {
+                  lastSoundAt = now;
+                  showImpact(norm, now);
+                  playHitSound('9G検出');
+                } else {
+                  console.log('クールダウン中につき再生省略');
+                }
               }
             }
 
@@ -155,15 +224,11 @@
     startBtn.addEventListener('click', async () => {
       startBtn.disabled = true;
       try {
-        cameraStream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+        cameraStream = await navigator.mediaDevices.getUserMedia({video: true, audio: false});
       } catch (err) {
-        // マイクを許可できない場合は映像のみ試す
-        try { cameraStream = await navigator.mediaDevices.getUserMedia({video: true, audio: false}); }
-        catch (cameraErr) {
-          startBtn.disabled = false;
-          status.innerText = 'カメラを開始できません: ' + cameraErr.message;
-          return;
-        }
+        startBtn.disabled = false;
+        status.innerText = 'カメラを開始できません: ' + err.message;
+        return;
       }
       if (!window.MediaRecorder) {
         cameraStream.getTracks().forEach(t => t.stop());
@@ -195,6 +260,15 @@
       cameraPreview.srcObject = cameraStream;
       cameraPreview.style.display = 'block';
       recordedData = [];
+      clearTimeout(impactHideTimer);
+      impactBanner.classList.remove('active');
+      cameraImpact.classList.remove('active');
+      lastImpact.textContent = '最新の打球検出: なし';
+      detectedCount = 0;
+      playbackCount = 0;
+      playbackErrorCount = 0;
+      lastSoundAt = -Infinity;
+      updateDetectionInfo();
       startTime = null;
       csvFirstReceivedAt = null;
       receiveBuffer = '';
@@ -203,7 +277,7 @@
       isRecording = true;
       stopBtn.disabled = false;
       downloadBtn.disabled = true;
-      status.innerText = '● CSVとカメラを記録中... スイングしてください';
+      status.innerText = '● CSVとカメラ（マイクOFF）を記録中... スイングしてください';
       dataCount.innerText = '記録行数: 0 行';
     });
 
