@@ -104,8 +104,7 @@
       }, 1200);
     }
     const SOUND_THRESHOLD_G = 9;
-    const SOUND_COOLDOWN_MS = 500;
-    let lastSoundAt = -Infinity;
+    const SOUND_COOLDOWN_MS = 200; // 連続再生を防ぐためのクールダウン時間
     let detectedCount = 0;
     let playbackCount = 0;
     let playbackErrorCount = 0;
