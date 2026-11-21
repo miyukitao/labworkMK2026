@@ -108,6 +108,7 @@
     let detectedCount = 0;
     let playbackCount = 0;
     let playbackErrorCount = 0;
+    let lastSoundAt = -Infinity;
     function updateDetectionInfo(extra = '') {
       detectionInfo.textContent = `9G超え検出: ${detectedCount}回 / 再生開始: ${playbackCount}回 / 再生エラー: ${playbackErrorCount}回` + (extra ? ` / ${extra}` : '');
     }
@@ -193,20 +194,25 @@
               }
             }
 
-            // 記録中の場合は生加速度データを保存
+            // 記録中の場合は加速度・ジャイロデータを保存
             if (isRecording) {
               const parts = line.split(",");
-              const currentMs = parseInt(parts[0].trim(), 10);
 
-              if (!isNaN(currentMs)) {
-                // 記録開始後の最初の1行目の時間を基準（0ms）にする
-                if (startTime === null) {
-                  startTime = currentMs;
-                  csvFirstReceivedAt = performance.now();
+              // Time, Norm, AccX, AccY, AccZ, GyroX, GyroY, GyroZ
+              if (parts.length === 8) {
+                const values = parts.map(p => Number(p.trim()));
+                const currentMs = values[0];
+
+                if (values.every(Number.isFinite)) {
+                  // 最初の受信データを0msにする
+                  if (startTime === null) {
+                    startTime = currentMs;
+                    csvFirstReceivedAt = performance.now();
+                  }
+
+                  values[0] = currentMs - startTime;
+                  recordedData.push(values.join(","));
                 }
-                // 基準時刻を引いて 0ms 起点に置き換える
-                parts[0] = currentMs - startTime;
-                recordedData.push(parts.join(","));
               }
             }
           }
@@ -300,7 +306,7 @@
       if (recordedData.length === 0) return;
 
       // 生加速度用のCSVヘッダー
-      const header = "Time_ms,Raw_Norm_G,Raw_Acc_X,Raw_Acc_Y,Raw_Acc_Z\n";
+      const header = "Time_ms,Raw_Norm_G,Raw_Acc_X,Raw_Acc_Y,Raw_Acc_Z,Gyro_X,Gyro_Y,Gyro_Z\n";
       const csvContent = header + recordedData.join("\n");
 
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
